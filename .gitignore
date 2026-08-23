@@ -1,0 +1,6 @@
+#extracted pdfs
+*.pdf
+
+#templates
+*.docx
+*.doc
