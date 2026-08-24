@@ -5,6 +5,7 @@ from tkinter import ttk, filedialog, messagebox
 import win32com.client
 import pythoncom
 from docxtpl import DocxTemplate
+from PyPDF2 import PdfMerger  # 👈 المكتبة الجديدة المسؤولة عن الدمج
 
 # ==========================================
 # قاموس اللغات لدعم العربية والإنجليزية
@@ -21,9 +22,10 @@ LANG_DICT = {
         'tags_lbl': 'New Tag Name:',
         'add_tag_btn': '+ Add Tag',
         'current_tags': 'Current Tags: ',
-        'input_frame': 'Data Entry (Lock 🔒 constant tags like Date/Manager)',
+        'input_frame': 'Data Entry (Lock 🔒 constant tags)',
         'add_cert_btn': 'Add to List (or press Enter)',
         'list_frame': 'Certificates List',
+        'merge_lbl': 'Merge all into a single PDF file',
         'generate_btn': '🚀 Generate Certificates',
         'status_ready': 'Status: Ready',
         'error_no_template': 'Please select a Word template path.',
@@ -31,8 +33,9 @@ LANG_DICT = {
         'error_no_certs': 'Please add at least one certificate.',
         'error_empty_fields': 'Please fill all fields before adding.',
         'error_tag_exists': 'Tag already exists.',
-        'msg_done': '🎉 Certificates generated successfully!',
+        'msg_done': '🎉 Done successfully!',
         'msg_generating': 'Generating... Please wait.',
+        'msg_merging': 'Merging PDFs...',
         'del_btn': 'X'
     },
     'AR': {
@@ -46,9 +49,10 @@ LANG_DICT = {
         'tags_lbl': 'اسم Tag جديد:',
         'add_tag_btn': '+ إضافة',
         'current_tags': 'الـ Tags الحالية: ',
-        'input_frame': 'إدخال البيانات (اضغط 🔒 لتثبيت البيانات التي لا تتغير مثل التاريخ والمدير)',
+        'input_frame': 'إدخال البيانات (اضغط 🔒 لتثبيت الثوابت)',
         'add_cert_btn': 'إضافة للقائمة (أو اضغط Enter)',
         'list_frame': 'قائمة الشهادات',
+        'merge_lbl': 'دمج جميع الشهادات في ملف PDF واحد',
         'generate_btn': '🚀 إصدار الشهادات',
         'status_ready': 'الحالة: مستعد',
         'error_no_template': 'يرجى تحديد مسار قالب الوورد.',
@@ -56,8 +60,9 @@ LANG_DICT = {
         'error_no_certs': 'يرجى إضافة شهادة واحدة على الأقل للقائمة.',
         'error_empty_fields': 'يرجى تعبئة جميع الحقول قبل الإضافة.',
         'error_tag_exists': 'هذا الـ Tag موجود بالفعل.',
-        'msg_done': '🎉 تم إصدار جميع الشهادات بنجاح!',
+        'msg_done': '🎉 تمت العملية بنجاح!',
         'msg_generating': 'جاري الإصدار... يرجى الانتظار.',
+        'msg_merging': 'جاري دمج الملفات...',
         'del_btn': 'X'
     }
 }
@@ -67,13 +72,12 @@ class CertificateApp:
         self.root = root
         self.lang = 'AR'
         self.tags = ['name']
-        self.locked_tags = {'name': False} # قاموس لتتبع حالة القفل لكل Tag
+        self.locked_tags = {'name': False}
         self.certificates = []
-        
         self.entry_widgets = {}
-        self.lock_buttons = {} # لتخزين أزرار القفل للتحكم بها
+        self.lock_buttons = {}
         
-        self.root.geometry("750x750")
+        self.root.geometry("750x800") # 👈 زيادة الطول قليلاً لاستيعاب الإضافات الجديدة
         
         self.setup_ui()
         self.update_ui_texts()
@@ -132,47 +136,53 @@ class CertificateApp:
         self.scrollbar = ttk.Scrollbar(self.list_frame, orient="vertical", command=self.canvas.yview)
         self.scrollable_list = ttk.Frame(self.canvas)
         
-        self.scrollable_list.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
+        self.scrollable_list.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.create_window((0, 0), window=self.scrollable_list, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
+        # 👈 قسم الخيارات الإضافية (خيار الدمج)
+        self.options_frame = ttk.Frame(self.root)
+        self.options_frame.pack(fill='x', padx=10, pady=5)
+        self.merge_var = tk.BooleanVar(value=False)
+        self.merge_chk = ttk.Checkbutton(self.options_frame, variable=self.merge_var)
+        self.merge_chk.pack(side='left')
+
+        # 👈 قسم شريط التقدم وزر التشغيل
         self.bottom_frame = ttk.Frame(self.root)
         self.bottom_frame.pack(fill='x', padx=10, pady=10)
         
         self.generate_btn = ttk.Button(self.bottom_frame, command=self.start_generation)
         self.generate_btn.pack(side='left', padx=5)
         
+        # إعداد شريط التقدم Progress Bar
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(self.bottom_frame, variable=self.progress_var, maximum=100)
+        self.progress_bar.pack(side='left', fill='x', expand=True, padx=10)
+        
         self.status_lbl = ttk.Label(self.bottom_frame, font=('Arial', 10, 'bold'))
-        self.status_lbl.pack(side='left', padx=10)
+        self.status_lbl.pack(side='right', padx=10)
 
     def update_ui_texts(self):
         t = LANG_DICT[self.lang]
         self.root.title(t['window_title'])
         self.lang_btn.config(text=t['lang_btn'])
-        
         self.paths_frame.config(text=t['paths_frame'])
         self.template_lbl.config(text=t['template_lbl'])
         self.output_lbl.config(text=t['output_lbl'])
         self.template_browse_btn.config(text=t['browse_btn'])
         self.output_browse_btn.config(text=t['browse_btn'])
-        
         self.tags_frame.config(text=t['tags_frame'])
         self.tag_input_lbl.config(text=t['tags_lbl'])
         self.add_tag_btn.config(text=t['add_tag_btn'])
-        
         self.input_frame.config(text=t['input_frame'])
         self.add_cert_btn.config(text=t['add_cert_btn'])
-        
         self.list_frame.config(text=t['list_frame'])
         self.generate_btn.config(text=t['generate_btn'])
-        
         self.status_lbl.config(text=t['status_ready'])
+        self.merge_chk.config(text=t['merge_lbl']) # تحديث لغة خيار الدمج
         self.refresh_tags_display()
 
     def toggle_lang(self):
@@ -182,13 +192,11 @@ class CertificateApp:
 
     def browse_template(self):
         path = filedialog.askopenfilename(filetypes=[("Word Documents", "*.docx")])
-        if path:
-            self.template_path_var.set(path)
+        if path: self.template_path_var.set(path)
 
     def browse_output(self):
         path = filedialog.askdirectory()
-        if path:
-            self.output_path_var.set(path)
+        if path: self.output_path_var.set(path)
 
     def add_tag(self):
         new_tag = self.new_tag_var.get().strip()
@@ -198,7 +206,7 @@ class CertificateApp:
                 messagebox.showerror("Error", t['error_tag_exists'])
             else:
                 self.tags.append(new_tag)
-                self.locked_tags[new_tag] = False # الحالة الافتراضية مفتوح
+                self.locked_tags[new_tag] = False
                 self.new_tag_var.set("")
                 self.refresh_tags_display()
                 self.refresh_input_frame()
@@ -208,39 +216,31 @@ class CertificateApp:
         self.current_tags_lbl.config(text=f"{t['current_tags']} {', '.join(self.tags)}")
 
     def toggle_lock(self, tag):
-        """دالة مسؤولة عن عكس حالة القفل وتغيير شكل الحقل"""
         is_locked = self.locked_tags[tag]
-        self.locked_tags[tag] = not is_locked # عكس الحالة
-        
+        self.locked_tags[tag] = not is_locked
         btn = self.lock_buttons[tag]
         entry = self.entry_widgets[tag]
         
         if self.locked_tags[tag]:
             btn.config(text="🔒")
-            entry.config(state='readonly') # منع التعديل
+            entry.config(state='readonly')
         else:
             btn.config(text="🔓")
-            entry.config(state='normal') # السماح بالتعديل
+            entry.config(state='normal')
 
     def refresh_input_frame(self):
-        for widget in self.dynamic_entries_frame.winfo_children():
-            widget.destroy()
-            
+        for widget in self.dynamic_entries_frame.winfo_children(): widget.destroy()
         self.entry_widgets.clear()
         self.lock_buttons.clear()
         
         for idx, tag in enumerate(self.tags):
-            # اسم الـ Tag
             lbl = ttk.Label(self.dynamic_entries_frame, text=f"{tag}:")
             lbl.grid(row=0, column=idx*3, padx=2, pady=5)
-            
-            # حقل الإدخال
             entry = ttk.Entry(self.dynamic_entries_frame, width=15)
             entry.grid(row=0, column=idx*3 + 1, padx=2, pady=5)
             entry.bind('<Return>', lambda e: self.add_certificate())
             self.entry_widgets[tag] = entry
             
-            # زر القفل
             is_locked = self.locked_tags.get(tag, False)
             btn_text = "🔒" if is_locked else "🔓"
             lock_btn = ttk.Button(self.dynamic_entries_frame, text=btn_text, width=3,
@@ -248,12 +248,9 @@ class CertificateApp:
             lock_btn.grid(row=0, column=idx*3 + 2, padx=2, pady=5)
             self.lock_buttons[tag] = lock_btn
             
-            # تطبيق الحالة المحفوظة (في حال تغيير اللغة مثلاً)
-            if is_locked:
-                entry.config(state='readonly')
+            if is_locked: entry.config(state='readonly')
             
         if self.tags:
-            # وضع المؤشر في أول حقل غير مقفول
             for tag in self.tags:
                 if not self.locked_tags[tag]:
                     self.entry_widgets[tag].focus_set()
@@ -262,8 +259,6 @@ class CertificateApp:
     def add_certificate(self):
         t = LANG_DICT[self.lang]
         cert_data = {}
-        
-        # قراءة البيانات (الدالة .get() تعمل حتى لو كان الحقل readonly)
         for tag, entry in self.entry_widgets.items():
             val = entry.get().strip()
             if not val:
@@ -273,17 +268,12 @@ class CertificateApp:
             
         self.certificates.append(cert_data)
         
-        # 🟢 مسح محتوى الحقول "الغير مقفلة فقط" 🟢
-        first_unlocked_entry = None
+        first_unlocked = None
         for tag, entry in self.entry_widgets.items():
             if not self.locked_tags[tag]:
                 entry.delete(0, tk.END)
-                if first_unlocked_entry is None:
-                    first_unlocked_entry = entry
-        
-        # إعادة التركيز (Focus) لأول حقل تم تفريغه (غالباً سيكون اسم الطالب)
-        if first_unlocked_entry:
-            first_unlocked_entry.focus_set()
+                if first_unlocked is None: first_unlocked = entry
+        if first_unlocked: first_unlocked.focus_set()
         
         self.render_all_certificates()
 
@@ -292,9 +282,7 @@ class CertificateApp:
         self.render_all_certificates()
 
     def render_all_certificates(self):
-        for widget in self.scrollable_list.winfo_children():
-            widget.destroy()
-            
+        for widget in self.scrollable_list.winfo_children(): widget.destroy()
         t = LANG_DICT[self.lang]
         for index, cert_data in enumerate(self.certificates):
             row_frame = ttk.Frame(self.scrollable_list)
@@ -309,6 +297,10 @@ class CertificateApp:
 
     def status_update(self, msg):
         self.root.after(0, lambda: self.status_lbl.config(text=msg))
+
+    def update_progress(self, value):
+        """تحديث قيمة شريط التقدم بأمان داخل الـ Thread"""
+        self.root.after(0, lambda: self.progress_var.set(value))
 
     def start_generation(self):
         t = LANG_DICT[self.lang]
@@ -325,6 +317,10 @@ class CertificateApp:
         self.generate_btn.config(state='disabled')
         self.status_update(t['msg_generating'])
         
+        # تهيئة شريط التقدم للصفر وضبط القيمة القصوى
+        self.progress_var.set(0)
+        self.progress_bar.config(maximum=len(self.certificates))
+        
         threading.Thread(target=self.generate_logic, daemon=True).start()
 
     def generate_logic(self):
@@ -333,6 +329,7 @@ class CertificateApp:
         output_folder = self.output_path_var.get()
         
         pythoncom.CoInitialize() 
+        generated_pdfs = [] # 👈 قائمة لتخزين مسارات الـ PDFs الناتجة لاستخدامها في الدمج
         
         try:
             abs_template = os.path.abspath(template_path)
@@ -362,6 +359,7 @@ class CertificateApp:
                 try:
                     word_doc = word_app.Documents.Open(temp_docx_path)
                     word_doc.SaveAs(pdf_path, FileFormat=17) 
+                    generated_pdfs.append(pdf_path) # 👈 حفظ مسار الملف لغرض الدمج لاحقاً
                 except Exception as e:
                     print(f"Error PDF: {e}")
                 finally:
@@ -371,6 +369,26 @@ class CertificateApp:
                 if os.path.exists(temp_docx_path):
                     os.remove(temp_docx_path)
                     
+                # 👈 تحديث شريط التقدم بعد كل شهادة
+                self.update_progress(index)
+            
+            # ==========================================
+            # 👈 منطق دمج الملفات إذا كان الخيار مفعلاً
+            # ==========================================
+            if self.merge_var.get() and generated_pdfs:
+                self.status_update(t['msg_merging'])
+                
+                merger = PdfMerger()
+                for pdf in generated_pdfs:
+                    merger.append(pdf)
+                
+                merged_output_path = os.path.join(abs_output, "All_Certificates_Merged.pdf")
+                merger.write(merged_output_path)
+                merger.close()
+                
+                # ملحوظة: لم نقم بمسح الشهادات الفردية (تم تركها كنسخ احتياطية)،
+                # وتم إنشاء ملف الدمج بجوارها.
+                    
             self.status_update(t['msg_done'])
             
         except Exception as e:
@@ -379,7 +397,6 @@ class CertificateApp:
             word_app.Quit()
             pythoncom.CoUninitialize() 
             self.root.after(0, lambda: self.generate_btn.config(state='normal'))
-
 
 if __name__ == "__main__":
     root = tk.Tk()
