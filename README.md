@@ -43,7 +43,7 @@ A robust, Python-based GUI application designed to automate the mass generation 
 
 6. Preview & Generate: Click **Preview Sample** to verify alignment, then click **Generate Certificates** to start the batch process.
 
-<video src="demo.mp4" autoplay loop muted playsinline width="100%"></video>
+<video src="InfoClip.mp4" autoplay loop muted playsinline width="100%"></video>
 
 ## 🏗️ Built With
 * [Tkinter](https://docs.python.org/3/library/tkinter.html) - GUI Framework
