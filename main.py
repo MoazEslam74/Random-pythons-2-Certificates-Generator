@@ -5,10 +5,12 @@ from tkinter import ttk, filedialog, messagebox
 import win32com.client
 import pythoncom
 from docxtpl import DocxTemplate
-from PyPDF2 import PdfMerger  # 👈 المكتبة الجديدة المسؤولة عن الدمج
+from PyPDF2 import PdfMerger
+import fitz  # PyMuPDF (for reading PDFs)
+from PIL import Image, ImageTk  # Pillow (for displaying images in Tkinter)
 
 # ==========================================
-# قاموس اللغات لدعم العربية والإنجليزية
+# Language dictionary for Arabic and English support
 # ==========================================
 LANG_DICT = {
     'EN': {
@@ -27,6 +29,7 @@ LANG_DICT = {
         'list_frame': 'Certificates List',
         'merge_lbl': 'Merge all into a single PDF file',
         'generate_btn': '🚀 Generate Certificates',
+        'preview_btn': '👁️ Preview Sample',
         'status_ready': 'Status: Ready',
         'error_no_template': 'Please select a Word template path.',
         'error_no_output': 'Please select an output folder.',
@@ -35,7 +38,9 @@ LANG_DICT = {
         'error_tag_exists': 'Tag already exists.',
         'msg_done': '🎉 Done successfully!',
         'msg_generating': 'Generating... Please wait.',
+        'msg_previewing': 'Loading preview...',
         'msg_merging': 'Merging PDFs...',
+        'preview_title': 'Certificate Preview',
         'del_btn': 'X'
     },
     'AR': {
@@ -54,6 +59,7 @@ LANG_DICT = {
         'list_frame': 'قائمة الشهادات',
         'merge_lbl': 'دمج جميع الشهادات في ملف PDF واحد',
         'generate_btn': '🚀 إصدار الشهادات',
+        'preview_btn': '👁️ معاينة عينة',
         'status_ready': 'الحالة: مستعد',
         'error_no_template': 'يرجى تحديد مسار قالب الوورد.',
         'error_no_output': 'يرجى تحديد مسار مجلد الحفظ.',
@@ -62,7 +68,9 @@ LANG_DICT = {
         'error_tag_exists': 'هذا الـ Tag موجود بالفعل.',
         'msg_done': '🎉 تمت العملية بنجاح!',
         'msg_generating': 'جاري الإصدار... يرجى الانتظار.',
+        'msg_previewing': 'جاري تجهيز المعاينة...',
         'msg_merging': 'جاري دمج الملفات...',
+        'preview_title': 'معاينة الشهادة',
         'del_btn': 'X'
     }
 }
@@ -77,7 +85,7 @@ class CertificateApp:
         self.entry_widgets = {}
         self.lock_buttons = {}
         
-        self.root.geometry("750x800") # 👈 زيادة الطول قليلاً لاستيعاب الإضافات الجديدة
+        self.root.geometry("750x800") 
         
         self.setup_ui()
         self.update_ui_texts()
@@ -143,21 +151,22 @@ class CertificateApp:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        # 👈 قسم الخيارات الإضافية (خيار الدمج)
         self.options_frame = ttk.Frame(self.root)
         self.options_frame.pack(fill='x', padx=10, pady=5)
         self.merge_var = tk.BooleanVar(value=False)
         self.merge_chk = ttk.Checkbutton(self.options_frame, variable=self.merge_var)
         self.merge_chk.pack(side='left')
 
-        # 👈 قسم شريط التقدم وزر التشغيل
         self.bottom_frame = ttk.Frame(self.root)
         self.bottom_frame.pack(fill='x', padx=10, pady=10)
         
+        # New preview button
+        self.preview_btn = ttk.Button(self.bottom_frame, command=self.start_preview)
+        self.preview_btn.pack(side='left', padx=5)
+
         self.generate_btn = ttk.Button(self.bottom_frame, command=self.start_generation)
         self.generate_btn.pack(side='left', padx=5)
         
-        # إعداد شريط التقدم Progress Bar
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(self.bottom_frame, variable=self.progress_var, maximum=100)
         self.progress_bar.pack(side='left', fill='x', expand=True, padx=10)
@@ -181,8 +190,9 @@ class CertificateApp:
         self.add_cert_btn.config(text=t['add_cert_btn'])
         self.list_frame.config(text=t['list_frame'])
         self.generate_btn.config(text=t['generate_btn'])
+        self.preview_btn.config(text=t['preview_btn']) # Update the preview button language
         self.status_lbl.config(text=t['status_ready'])
-        self.merge_chk.config(text=t['merge_lbl']) # تحديث لغة خيار الدمج
+        self.merge_chk.config(text=t['merge_lbl']) 
         self.refresh_tags_display()
 
     def toggle_lang(self):
@@ -220,7 +230,6 @@ class CertificateApp:
         self.locked_tags[tag] = not is_locked
         btn = self.lock_buttons[tag]
         entry = self.entry_widgets[tag]
-        
         if self.locked_tags[tag]:
             btn.config(text="🔒")
             entry.config(state='readonly')
@@ -232,7 +241,6 @@ class CertificateApp:
         for widget in self.dynamic_entries_frame.winfo_children(): widget.destroy()
         self.entry_widgets.clear()
         self.lock_buttons.clear()
-        
         for idx, tag in enumerate(self.tags):
             lbl = ttk.Label(self.dynamic_entries_frame, text=f"{tag}:")
             lbl.grid(row=0, column=idx*3, padx=2, pady=5)
@@ -249,7 +257,6 @@ class CertificateApp:
             self.lock_buttons[tag] = lock_btn
             
             if is_locked: entry.config(state='readonly')
-            
         if self.tags:
             for tag in self.tags:
                 if not self.locked_tags[tag]:
@@ -265,7 +272,6 @@ class CertificateApp:
                 messagebox.showwarning("Warning", t['error_empty_fields'])
                 return
             cert_data[tag] = val
-            
         self.certificates.append(cert_data)
         
         first_unlocked = None
@@ -274,7 +280,6 @@ class CertificateApp:
                 entry.delete(0, tk.END)
                 if first_unlocked is None: first_unlocked = entry
         if first_unlocked: first_unlocked.focus_set()
-        
         self.render_all_certificates()
 
     def remove_certificate(self, index):
@@ -287,10 +292,8 @@ class CertificateApp:
         for index, cert_data in enumerate(self.certificates):
             row_frame = ttk.Frame(self.scrollable_list)
             row_frame.pack(fill='x', pady=2, padx=5)
-            
             display_text = " | ".join([f"{k}: {v}" for k, v in cert_data.items()])
             ttk.Label(row_frame, text=display_text).pack(side='left', padx=5)
-            
             del_btn = ttk.Button(row_frame, text=t['del_btn'], width=3,
                                command=lambda i=index: self.remove_certificate(i))
             del_btn.pack(side='right', padx=5)
@@ -299,25 +302,139 @@ class CertificateApp:
         self.root.after(0, lambda: self.status_lbl.config(text=msg))
 
     def update_progress(self, value):
-        """تحديث قيمة شريط التقدم بأمان داخل الـ Thread"""
         self.root.after(0, lambda: self.progress_var.set(value))
 
+    # ==========================================
+    # Preview section (Preview Logic)
+    # ==========================================
+    def start_preview(self):
+        t = LANG_DICT[self.lang]
+        if not self.template_path_var.get() or not self.output_path_var.get():
+            messagebox.showerror("Error", "يرجى تحديد مسار القالب ومسار الحفظ أولاً" if self.lang == 'AR' else "Please select template and output paths.")
+            return
+
+        self.preview_btn.config(state='disabled')
+        self.generate_btn.config(state='disabled')
+        self.status_update(t['msg_previewing'])
+        
+        threading.Thread(target=self.preview_logic, daemon=True).start()
+
+    def preview_logic(self):
+        t = LANG_DICT[self.lang]
+        pythoncom.CoInitialize() 
+        try:
+            abs_template = os.path.abspath(self.template_path_var.get())
+            abs_output = os.path.abspath(self.output_path_var.get())
+            
+            # Generate demo data when no entries have been added.
+            # Otherwise, use the first person in the list.
+            if self.certificates:
+                preview_data = self.certificates[0]
+            else:
+                preview_data = {tag: f"[{tag}_Demo]" for tag in self.tags}
+            
+            word_app = win32com.client.DispatchEx("Word.Application")
+            word_app.Visible = False
+            word_app.DisplayAlerts = False
+            
+            doc = DocxTemplate(abs_template)
+            doc.render(preview_data)
+            
+            temp_docx = os.path.join(abs_output, "temp_preview_cert.docx")
+            temp_pdf = os.path.join(abs_output, "temp_preview_cert.pdf")
+            
+            doc.save(temp_docx)
+            word_doc = None
+            try:
+                word_doc = word_app.Documents.Open(temp_docx)
+                word_doc.SaveAs(temp_pdf, FileFormat=17) 
+            finally:
+                if word_doc: word_doc.Close(SaveChanges=False)
+            
+            if os.path.exists(temp_docx):
+                os.remove(temp_docx)
+                
+            # Display the preview window on the main UI thread.
+            self.root.after(0, lambda: self.show_preview_window(temp_pdf))
+            
+        except Exception as e:
+            self.status_update(f"Preview Error: {e}")
+            self.root.after(0, lambda: self.preview_btn.config(state='normal'))
+            self.root.after(0, lambda: self.generate_btn.config(state='normal'))
+        finally:
+            word_app.Quit()
+            pythoncom.CoUninitialize()
+
+    def show_preview_window(self, pdf_path):
+        """Display the PDF as an image in a pop-up window."""
+        t = LANG_DICT[self.lang]
+        self.preview_btn.config(state='normal')
+        self.generate_btn.config(state='normal')
+        self.status_update(t['status_ready'])
+
+        preview_win = tk.Toplevel(self.root)
+        preview_win.title(t['preview_title'])
+        preview_win.geometry("800x600")
+
+        # Set up a scrollable area because the certificate may exceed the screen size.
+        canvas = tk.Canvas(preview_win, bg='gray')
+        v_scrollbar = ttk.Scrollbar(preview_win, orient="vertical", command=canvas.yview)
+        h_scrollbar = ttk.Scrollbar(preview_win, orient="horizontal", command=canvas.xview)
+        canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        
+        v_scrollbar.pack(side="right", fill="y")
+        h_scrollbar.pack(side="bottom", fill="x")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        try:
+            # Convert the PDF to an image using PyMuPDF.
+            pdf_doc = fitz.open(pdf_path)
+            page = pdf_doc.load_page(0)
+            zoom = 1.2 # Enlarge the image slightly for better resolution.
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+            
+            # Convert it for use with Tkinter.
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            photo = ImageTk.PhotoImage(img)
+
+            # Place the image on the Canvas.
+            canvas.create_image(0, 0, anchor="nw", image=photo)
+            canvas.image = photo # Keep a reference so the image is not garbage-collected.
+            canvas.config(scrollregion=(0, 0, pix.width, pix.height))
+            
+            pdf_doc.close()
+            
+            # Delete the temporary PDF when the preview window closes.
+            def on_close():
+                preview_win.destroy()
+                try:
+                    if os.path.exists(pdf_path):
+                        os.remove(pdf_path)
+                except:
+                    pass
+            preview_win.protocol("WM_DELETE_WINDOW", on_close)
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load preview: {e}")
+            preview_win.destroy()
+
+    # ==========================================
+    # Main generation section (Generation Logic)
+    # ==========================================
     def start_generation(self):
         t = LANG_DICT[self.lang]
-        if not self.template_path_var.get():
+        if not self.template_path_var.get() or not self.output_path_var.get():
             messagebox.showerror("Error", t['error_no_template'])
-            return
-        if not self.output_path_var.get():
-            messagebox.showerror("Error", t['error_no_output'])
             return
         if not self.certificates:
             messagebox.showerror("Error", t['error_no_certs'])
             return
             
         self.generate_btn.config(state='disabled')
+        self.preview_btn.config(state='disabled')
         self.status_update(t['msg_generating'])
         
-        # تهيئة شريط التقدم للصفر وضبط القيمة القصوى
         self.progress_var.set(0)
         self.progress_bar.config(maximum=len(self.certificates))
         
@@ -325,16 +442,11 @@ class CertificateApp:
 
     def generate_logic(self):
         t = LANG_DICT[self.lang]
-        template_path = self.template_path_var.get()
-        output_folder = self.output_path_var.get()
-        
         pythoncom.CoInitialize() 
-        generated_pdfs = [] # 👈 قائمة لتخزين مسارات الـ PDFs الناتجة لاستخدامها في الدمج
-        
+        generated_pdfs = []
         try:
-            abs_template = os.path.abspath(template_path)
-            abs_output = os.path.abspath(output_folder)
-            
+            abs_template = os.path.abspath(self.template_path_var.get())
+            abs_output = os.path.abspath(self.output_path_var.get())
             word_app = win32com.client.DispatchEx("Word.Application")
             word_app.Visible = False
             word_app.DisplayAlerts = False
@@ -343,7 +455,6 @@ class CertificateApp:
             for index, cert_data in enumerate(self.certificates, start=1):
                 base_name = str(list(cert_data.values())[0]) 
                 safe_name = "".join([c for c in base_name if c.isalnum() or c in ' -_']).strip()
-                
                 status_msg = f"Processing ({index}/{total}): {safe_name}" if self.lang == 'EN' else f"جاري معالجة ({index}/{total}): {safe_name}"
                 self.status_update(status_msg)
                 
@@ -354,49 +465,34 @@ class CertificateApp:
                 pdf_path = os.path.join(abs_output, f"Cert_{safe_name}.pdf")
                 
                 doc.save(temp_docx_path)
-                
                 word_doc = None
                 try:
                     word_doc = word_app.Documents.Open(temp_docx_path)
                     word_doc.SaveAs(pdf_path, FileFormat=17) 
-                    generated_pdfs.append(pdf_path) # 👈 حفظ مسار الملف لغرض الدمج لاحقاً
+                    generated_pdfs.append(pdf_path)
                 except Exception as e:
                     print(f"Error PDF: {e}")
                 finally:
-                    if word_doc:
-                        word_doc.Close(SaveChanges=False)
-                
-                if os.path.exists(temp_docx_path):
-                    os.remove(temp_docx_path)
-                    
-                # 👈 تحديث شريط التقدم بعد كل شهادة
+                    if word_doc: word_doc.Close(SaveChanges=False)
+                if os.path.exists(temp_docx_path): os.remove(temp_docx_path)
                 self.update_progress(index)
             
-            # ==========================================
-            # 👈 منطق دمج الملفات إذا كان الخيار مفعلاً
-            # ==========================================
             if self.merge_var.get() and generated_pdfs:
                 self.status_update(t['msg_merging'])
-                
                 merger = PdfMerger()
-                for pdf in generated_pdfs:
-                    merger.append(pdf)
-                
+                for pdf in generated_pdfs: merger.append(pdf)
                 merged_output_path = os.path.join(abs_output, "All_Certificates_Merged.pdf")
                 merger.write(merged_output_path)
                 merger.close()
-                
-                # ملحوظة: لم نقم بمسح الشهادات الفردية (تم تركها كنسخ احتياطية)،
-                # وتم إنشاء ملف الدمج بجوارها.
                     
             self.status_update(t['msg_done'])
-            
         except Exception as e:
             self.status_update(f"Error: {e}")
         finally:
             word_app.Quit()
             pythoncom.CoUninitialize() 
             self.root.after(0, lambda: self.generate_btn.config(state='normal'))
+            self.root.after(0, lambda: self.preview_btn.config(state='normal'))
 
 if __name__ == "__main__":
     root = tk.Tk()
