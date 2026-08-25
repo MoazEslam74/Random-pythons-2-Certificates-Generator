@@ -4,3 +4,9 @@
 #templates
 *.docx
 *.doc
+
+#extraction files
+build_exe.py
+/dist
+/build
+*.spec
