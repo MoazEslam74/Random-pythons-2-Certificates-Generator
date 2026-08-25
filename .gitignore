@@ -10,3 +10,9 @@ build_exe.py
 /dist
 /build
 *.spec
+
+#temp files
+*.tmp
+
+#mp4 files for space
+*.mp4
