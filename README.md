@@ -42,8 +42,10 @@ A robust, Python-based GUI application designed to automate the mass generation 
 5. Enter Data: Type the data for each certificate. Use the 🔒 icon to lock repeating data. Press `Enter` to add it to the queue.
 
 6. Preview & Generate: Click **Preview Sample** to verify alignment, then click **Generate Certificates** to start the batch process.
+<p align="center">
+  <img src="" alt="info clip" width="500" >
+</p>
 
-<video src="InfoClip.mp4" autoplay loop muted playsinline width="100%"></video>
 
 ## 🏗️ Built With
 * [Tkinter](https://docs.python.org/3/library/tkinter.html) - GUI Framework
