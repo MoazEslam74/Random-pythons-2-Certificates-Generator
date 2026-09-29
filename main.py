@@ -6,11 +6,12 @@ import win32com.client
 import pythoncom
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfMerger
-import fitz  # PyMuPDF (for reading PDFs)
-from PIL import Image, ImageTk  # Pillow (for displaying images in Tkinter)
+import fitz  
+from PIL import Image, ImageTk  
+import pandas as pd  # New library for reading Excel files
 
 # ==========================================
-# Language dictionary for Arabic and English support
+# Language dictionary
 # ==========================================
 LANG_DICT = {
     'EN': {
@@ -25,7 +26,13 @@ LANG_DICT = {
         'add_tag_btn': '+ Add Tag',
         'current_tags': 'Current Tags: ',
         'input_frame': 'Data Entry (Lock 🔒 constant tags)',
-        'add_cert_btn': 'Add to List (or press Enter)',
+        'add_cert_btn': 'Add Single to List (or Enter)',
+        'excel_frame': 'Excel Import (Optional)',
+        'enable_excel': 'Enable importing from Excel file',
+        'excel_path_lbl': 'Excel File:',
+        'import_excel_btn': '📥 Import & Add All to List',
+        'map_lbl': 'Map',
+        'to_col_lbl': 'to Column:',
         'list_frame': 'Certificates List',
         'merge_lbl': 'Merge all into a single PDF file',
         'generate_btn': '🚀 Generate Certificates',
@@ -33,8 +40,10 @@ LANG_DICT = {
         'status_ready': 'Status: Ready',
         'error_no_template': 'Please select a Word template path.',
         'error_no_output': 'Please select an output folder.',
+        'error_no_excel': 'Please select an Excel file.',
+        'error_map_missing': 'Please map all unlocked tags to Excel columns.',
         'error_no_certs': 'Please add at least one certificate.',
-        'error_empty_fields': 'Please fill all fields before adding.',
+        'error_empty_fields': 'Please fill all fields (or locked fields if using Excel).',
         'error_tag_exists': 'Tag already exists.',
         'msg_done': '🎉 Done successfully!',
         'msg_generating': 'Generating... Please wait.',
@@ -55,7 +64,13 @@ LANG_DICT = {
         'add_tag_btn': '+ إضافة',
         'current_tags': 'الـ Tags الحالية: ',
         'input_frame': 'إدخال البيانات (اضغط 🔒 لتثبيت الثوابت)',
-        'add_cert_btn': 'إضافة للقائمة (أو اضغط Enter)',
+        'add_cert_btn': 'إضافة اسم واحد للقائمة',
+        'excel_frame': 'الاستيراد من إكسيل (اختياري)',
+        'enable_excel': 'تفعيل الاستيراد من ملف Excel',
+        'excel_path_lbl': 'ملف الإكسيل:',
+        'import_excel_btn': '📥 استيراد وإضافة الجميع للقائمة',
+        'map_lbl': 'ربط',
+        'to_col_lbl': 'بالعمود:',
         'list_frame': 'قائمة الشهادات',
         'merge_lbl': 'دمج جميع الشهادات في ملف PDF واحد',
         'generate_btn': '🚀 إصدار الشهادات',
@@ -63,8 +78,10 @@ LANG_DICT = {
         'status_ready': 'الحالة: مستعد',
         'error_no_template': 'يرجى تحديد مسار قالب الوورد.',
         'error_no_output': 'يرجى تحديد مسار مجلد الحفظ.',
+        'error_no_excel': 'يرجى تحديد مسار ملف الإكسيل أولاً.',
+        'error_map_missing': 'يرجى ربط جميع الـ Tags المفتوحة بأعمدة الإكسيل.',
         'error_no_certs': 'يرجى إضافة شهادة واحدة على الأقل للقائمة.',
-        'error_empty_fields': 'يرجى تعبئة جميع الحقول قبل الإضافة.',
+        'error_empty_fields': 'يرجى تعبئة الحقول (أو الحقول المقفلة في حال الاستيراد).',
         'error_tag_exists': 'هذا الـ Tag موجود بالفعل.',
         'msg_done': '🎉 تمت العملية بنجاح!',
         'msg_generating': 'جاري الإصدار... يرجى الانتظار.',
@@ -85,7 +102,12 @@ class CertificateApp:
         self.entry_widgets = {}
         self.lock_buttons = {}
         
-        self.root.geometry("750x800") 
+        # Excel variables
+        self.excel_mode = tk.BooleanVar(value=False)
+        self.excel_columns = []
+        self.excel_mapping_vars = {} 
+        
+        self.root.geometry("800x850") 
         
         self.setup_ui()
         self.update_ui_texts()
@@ -137,6 +159,35 @@ class CertificateApp:
         self.add_cert_btn = ttk.Button(self.input_frame, command=self.add_certificate)
         self.add_cert_btn.pack(pady=5)
 
+        # ==========================================
+        # Excel import section
+        # ==========================================
+        self.excel_frame = ttk.LabelFrame(self.root)
+        self.excel_frame.pack(fill='x', padx=10, pady=5)
+        
+        self.enable_excel_chk = ttk.Checkbutton(self.excel_frame, variable=self.excel_mode, command=self.toggle_excel_ui)
+        self.enable_excel_chk.pack(anchor='w', padx=5, pady=5)
+        
+        self.excel_inner_frame = ttk.Frame(self.excel_frame)
+        # It will be shown later when the checkbox is enabled
+        
+        self.excel_path_frame = ttk.Frame(self.excel_inner_frame)
+        self.excel_path_frame.pack(fill='x', pady=5)
+        
+        self.excel_path_lbl = ttk.Label(self.excel_path_frame)
+        self.excel_path_lbl.pack(side='left', padx=5)
+        self.excel_path_var = tk.StringVar()
+        ttk.Entry(self.excel_path_frame, textvariable=self.excel_path_var, width=40).pack(side='left', padx=5)
+        self.excel_browse_btn = ttk.Button(self.excel_path_frame, command=self.browse_excel)
+        self.excel_browse_btn.pack(side='left', padx=5)
+        
+        self.mapping_frame = ttk.Frame(self.excel_inner_frame)
+        self.mapping_frame.pack(fill='x', pady=5)
+        
+        self.import_excel_btn = ttk.Button(self.excel_inner_frame, command=self.import_from_excel)
+        self.import_excel_btn.pack(pady=10)
+        # ==========================================
+
         self.list_frame = ttk.LabelFrame(self.root)
         self.list_frame.pack(fill='both', expand=True, padx=10, pady=5)
         
@@ -160,7 +211,6 @@ class CertificateApp:
         self.bottom_frame = ttk.Frame(self.root)
         self.bottom_frame.pack(fill='x', padx=10, pady=10)
         
-        # New preview button
         self.preview_btn = ttk.Button(self.bottom_frame, command=self.start_preview)
         self.preview_btn.pack(side='left', padx=5)
 
@@ -188,12 +238,21 @@ class CertificateApp:
         self.add_tag_btn.config(text=t['add_tag_btn'])
         self.input_frame.config(text=t['input_frame'])
         self.add_cert_btn.config(text=t['add_cert_btn'])
+        
+        # Excel labels
+        self.excel_frame.config(text=t['excel_frame'])
+        self.enable_excel_chk.config(text=t['enable_excel'])
+        self.excel_path_lbl.config(text=t['excel_path_lbl'])
+        self.excel_browse_btn.config(text=t['browse_btn'])
+        self.import_excel_btn.config(text=t['import_excel_btn'])
+        
         self.list_frame.config(text=t['list_frame'])
         self.generate_btn.config(text=t['generate_btn'])
-        self.preview_btn.config(text=t['preview_btn']) # Update the preview button language
+        self.preview_btn.config(text=t['preview_btn']) 
         self.status_lbl.config(text=t['status_ready'])
         self.merge_chk.config(text=t['merge_lbl']) 
         self.refresh_tags_display()
+        self.refresh_excel_mapping()  # Redraw labels in the correct language
 
     def toggle_lang(self):
         self.lang = 'EN' if self.lang == 'AR' else 'AR'
@@ -208,6 +267,100 @@ class CertificateApp:
         path = filedialog.askdirectory()
         if path: self.output_path_var.set(path)
 
+    # ==========================================
+    # Excel logic and tools
+    # ==========================================
+    def toggle_excel_ui(self):
+        """Show or hide the Excel settings section based on the enabled state."""
+        if self.excel_mode.get():
+            self.excel_inner_frame.pack(fill='x', padx=5, pady=5)
+        else:
+            self.excel_inner_frame.pack_forget()
+
+    def browse_excel(self):
+        """Select the Excel file and read its columns."""
+        path = filedialog.askopenfilename(filetypes=[("Excel Files", "*.xlsx *.xls")])
+        if path:
+            self.excel_path_var.set(path)
+            try:
+                # Read only the columns to save memory
+                df = pd.read_excel(path, nrows=0) 
+                self.excel_columns = df.columns.tolist()
+                self.refresh_excel_mapping()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to read Excel file:\n{e}")
+
+    def refresh_excel_mapping(self):
+        """Generate mapping dropdowns for each unlocked tag."""
+        for widget in self.mapping_frame.winfo_children(): 
+            widget.destroy()
+            
+        self.excel_mapping_vars.clear()
+        t = LANG_DICT[self.lang]
+        
+        # Filter only unlocked tags
+        unlocked_tags = [tag for tag in self.tags if not self.locked_tags[tag]]
+        
+        for idx, tag in enumerate(unlocked_tags):
+            # Mapping labels (example: map name to column:)
+            lbl = ttk.Label(self.mapping_frame, text=f"{t['map_lbl']} [{tag}] {t['to_col_lbl']}")
+            lbl.grid(row=0, column=idx*2, padx=5, pady=5)
+            
+            # Dropdown list containing Excel column names
+            combo_var = tk.StringVar()
+            combo = ttk.Combobox(self.mapping_frame, textvariable=combo_var, values=self.excel_columns, state="readonly", width=15)
+            combo.grid(row=0, column=idx*2 + 1, padx=5, pady=5)
+            self.excel_mapping_vars[tag] = combo_var
+
+    def import_from_excel(self):
+        """Read Excel data, take locked values from fields, and generate certificates in the list."""
+        t = LANG_DICT[self.lang]
+        if not self.excel_path_var.get():
+            messagebox.showerror("Error", t['error_no_excel'])
+            return
+            
+        # Verify that the user selected a column for each unlocked tag
+        for tag, combo_var in self.excel_mapping_vars.items():
+            if not combo_var.get():
+                messagebox.showerror("Error", t['error_map_missing'])
+                return
+                
+        # Verify that the locked fields (constants) are filled in above
+        locked_values = {}
+        for tag in self.tags:
+            if self.locked_tags[tag]:
+                val = self.entry_widgets[tag].get().strip()
+                if not val:
+                    messagebox.showerror("Error", f"Please fill the locked field: {tag}")
+                    return
+                locked_values[tag] = val
+
+        try:
+            df = pd.read_excel(self.excel_path_var.get())
+            # Fill empty values to avoid NaN
+            df = df.fillna("") 
+            
+            imported_count = 0
+            for index, row in df.iterrows():
+                cert_data = {}
+                for tag in self.tags:
+                    if self.locked_tags[tag]:
+                        cert_data[tag] = locked_values[tag]  # From locked values (UI)
+                    else:
+                        col_name = self.excel_mapping_vars[tag].get()
+                        cert_data[tag] = str(row[col_name]).strip()  # From Excel
+                
+                self.certificates.append(cert_data)
+                imported_count += 1
+                
+            self.render_all_certificates()
+            messagebox.showinfo("Success", f"Successfully imported {imported_count} records from Excel.")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to import data:\n{e}")
+
+    # ==========================================
+
     def add_tag(self):
         new_tag = self.new_tag_var.get().strip()
         t = LANG_DICT[self.lang]
@@ -220,6 +373,7 @@ class CertificateApp:
                 self.new_tag_var.set("")
                 self.refresh_tags_display()
                 self.refresh_input_frame()
+                self.refresh_excel_mapping()  # Update the Excel section when a tag is added
 
     def refresh_tags_display(self):
         t = LANG_DICT[self.lang]
@@ -236,6 +390,9 @@ class CertificateApp:
         else:
             btn.config(text="🔓")
             entry.config(state='normal')
+            
+        # Update the Excel mapping list; when a tag is locked, it disappears from Excel mapping and vice versa.
+        self.refresh_excel_mapping()
 
     def refresh_input_frame(self):
         for widget in self.dynamic_entries_frame.winfo_children(): widget.destroy()
@@ -264,6 +421,7 @@ class CertificateApp:
                     break
 
     def add_certificate(self):
+        """Add a single certificate manually."""
         t = LANG_DICT[self.lang]
         cert_data = {}
         for tag, entry in self.entry_widgets.items():
@@ -304,19 +462,14 @@ class CertificateApp:
     def update_progress(self, value):
         self.root.after(0, lambda: self.progress_var.set(value))
 
-    # ==========================================
-    # Preview section (Preview Logic)
-    # ==========================================
     def start_preview(self):
         t = LANG_DICT[self.lang]
         if not self.template_path_var.get() or not self.output_path_var.get():
             messagebox.showerror("Error", "يرجى تحديد مسار القالب ومسار الحفظ أولاً" if self.lang == 'AR' else "Please select template and output paths.")
             return
-
         self.preview_btn.config(state='disabled')
         self.generate_btn.config(state='disabled')
         self.status_update(t['msg_previewing'])
-        
         threading.Thread(target=self.preview_logic, daemon=True).start()
 
     def preview_logic(self):
@@ -326,8 +479,6 @@ class CertificateApp:
             abs_template = os.path.abspath(self.template_path_var.get())
             abs_output = os.path.abspath(self.output_path_var.get())
             
-            # Generate demo data when no entries have been added.
-            # Otherwise, use the first person in the list.
             if self.certificates:
                 preview_data = self.certificates[0]
             else:
@@ -354,7 +505,6 @@ class CertificateApp:
             if os.path.exists(temp_docx):
                 os.remove(temp_docx)
                 
-            # Display the preview window on the main UI thread.
             self.root.after(0, lambda: self.show_preview_window(temp_pdf))
             
         except Exception as e:
@@ -362,11 +512,13 @@ class CertificateApp:
             self.root.after(0, lambda: self.preview_btn.config(state='normal'))
             self.root.after(0, lambda: self.generate_btn.config(state='normal'))
         finally:
-            word_app.Quit()
+            try:
+                word_app.Quit()
+            except:
+                pass
             pythoncom.CoUninitialize()
 
     def show_preview_window(self, pdf_path):
-        """Display the PDF as an image in a pop-up window."""
         t = LANG_DICT[self.lang]
         self.preview_btn.config(state='normal')
         self.generate_btn.config(state='normal')
@@ -376,7 +528,6 @@ class CertificateApp:
         preview_win.title(t['preview_title'])
         preview_win.geometry("800x600")
 
-        # Set up a scrollable area because the certificate may exceed the screen size.
         canvas = tk.Canvas(preview_win, bg='gray')
         v_scrollbar = ttk.Scrollbar(preview_win, orient="vertical", command=canvas.yview)
         h_scrollbar = ttk.Scrollbar(preview_win, orient="horizontal", command=canvas.xview)
@@ -387,25 +538,21 @@ class CertificateApp:
         canvas.pack(side="left", fill="both", expand=True)
 
         try:
-            # Convert the PDF to an image using PyMuPDF.
             pdf_doc = fitz.open(pdf_path)
             page = pdf_doc.load_page(0)
-            zoom = 1.2 # Enlarge the image slightly for better resolution.
+            zoom = 1.2 
             mat = fitz.Matrix(zoom, zoom)
             pix = page.get_pixmap(matrix=mat)
             
-            # Convert it for use with Tkinter.
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             photo = ImageTk.PhotoImage(img)
 
-            # Place the image on the Canvas.
             canvas.create_image(0, 0, anchor="nw", image=photo)
-            canvas.image = photo # Keep a reference so the image is not garbage-collected.
+            canvas.image = photo 
             canvas.config(scrollregion=(0, 0, pix.width, pix.height))
             
             pdf_doc.close()
             
-            # Delete the temporary PDF when the preview window closes.
             def on_close():
                 preview_win.destroy()
                 try:
@@ -419,9 +566,6 @@ class CertificateApp:
             messagebox.showerror("Error", f"Failed to load preview: {e}")
             preview_win.destroy()
 
-    # ==========================================
-    # Main generation section (Generation Logic)
-    # ==========================================
     def start_generation(self):
         t = LANG_DICT[self.lang]
         if not self.template_path_var.get() or not self.output_path_var.get():
@@ -489,7 +633,10 @@ class CertificateApp:
         except Exception as e:
             self.status_update(f"Error: {e}")
         finally:
-            word_app.Quit()
+            try:
+                word_app.Quit()
+            except:
+                pass
             pythoncom.CoUninitialize() 
             self.root.after(0, lambda: self.generate_btn.config(state='normal'))
             self.root.after(0, lambda: self.preview_btn.config(state='normal'))

@@ -16,3 +16,7 @@ build_exe.py
 
 #mp4 files for space
 *.mp4
+
+#ignore app data 
+*.json
+*.xlsx
