@@ -189,7 +189,6 @@ class CertificateApp:
         # ==========================================
 
         self.list_frame = ttk.LabelFrame(self.root)
-        self.list_frame.pack(fill='both', expand=True, padx=10, pady=5)
         
         self.canvas = tk.Canvas(self.list_frame)
         self.scrollbar = ttk.Scrollbar(self.list_frame, orient="vertical", command=self.canvas.yview)
@@ -202,14 +201,14 @@ class CertificateApp:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
+        # Define the options frame (merge)
         self.options_frame = ttk.Frame(self.root)
-        self.options_frame.pack(fill='x', padx=10, pady=5)
         self.merge_var = tk.BooleanVar(value=False)
         self.merge_chk = ttk.Checkbutton(self.options_frame, variable=self.merge_var)
         self.merge_chk.pack(side='left')
 
+        # Define the bottom frame (buttons and progress bar)
         self.bottom_frame = ttk.Frame(self.root)
-        self.bottom_frame.pack(fill='x', padx=10, pady=10)
         
         self.preview_btn = ttk.Button(self.bottom_frame, command=self.start_preview)
         self.preview_btn.pack(side='left', padx=5)
@@ -223,6 +222,18 @@ class CertificateApp:
         
         self.status_lbl = ttk.Label(self.bottom_frame, font=('Arial', 10, 'bold'))
         self.status_lbl.pack(side='right', padx=10)
+
+        # ==========================================
+        # Fix here: reorder the packing layout
+        # ==========================================
+        # 1. Place the bottom bar (buttons) at the bottom of the screen first
+        self.bottom_frame.pack(side='bottom', fill='x', padx=10, pady=10)
+        
+        # 2. Place the merge option bar at the bottom as well (it will appear directly above the buttons)
+        self.options_frame.pack(side='bottom', fill='x', padx=10, pady=5)
+        
+        # 3. Finally, draw the certificate list to fill the remaining space between the top and bottom safely
+        self.list_frame.pack(fill='both', expand=True, padx=10, pady=5)
 
     def update_ui_texts(self):
         t = LANG_DICT[self.lang]
