@@ -43,7 +43,7 @@ A robust, Python-based GUI application designed to automate the mass generation 
 
 6. Preview & Generate: Click **Preview Sample** to verify alignment, then click **Generate Certificates** to start the batch process.
 <p align="center">
-  <img src="" alt="info clip" width="500" >
+  <img src="demo.gif" alt="info clip" width="500" >
 </p>
 
 
